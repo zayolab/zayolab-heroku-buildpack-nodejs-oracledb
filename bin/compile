@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# bin/compile <build-dir> <cache-dir> <env-dir>
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+indent() {
+    echo "       $*" || true
+}
+
+export_env_dir() {
+  acceptlist_regex=${4:-''}
+  denylist_regex=${5:-'^(PATH|GIT_DIR|CPATH|CPPATH|LD_PRELOAD|LIBRARY_PATH)$'}
+  if [ -d "$ENV_DIR" ]; then
+    for e in $(ls $ENV_DIR); do
+      echo "$e" | grep -E "$acceptlist_regex" | grep -qvE "$denylist_regex" &&
+      export "$e=$(cat $ENV_DIR/$e)"
+      :
+    done
+  fi
+}
+
+export_env_dir
+
+VENDOR_DIR=$BUILD_DIR/vendor
+ORACLE_DIR=$VENDOR_DIR/oracle
+INSTANTCLIENT_DIR=$ORACLE_DIR/instantclient_12_2
+PROFILE_D_DIR=$BUILD_DIR/.profile.d
+
+BASIC_FILENAME=instantclient-basic-linux.x64-12.2.0.1.0.zip
+SDK_FILENAME=instantclient-sdk-linux.x64-12.2.0.1.0.zip
+
+MIRROR_BASIC=$MIRROR_BASIC
+MIRROR_SDK=$MIRROR_SDK
+
+if [ ! -f $CACHE_DIR/$BASIC_FILENAME ]; then
+    indent "Downloading $BASIC_FILENAME..."
+    wget -O $CACHE_DIR/$BASIC_FILENAME $MIRROR_BASIC
+fi
+
+if [ ! -f $CACHE_DIR/$SDK_FILENAME ]; then
+    indent "Downloading $SDK_FILENAME..."
+    wget -O $CACHE_DIR/$SDK_FILENAME $MIRROR_SDK
+fi
+
+mkdir -p $ORACLE_DIR
+indent "Extracting $BASIC_FILENAME..."
+unzip -qq $CACHE_DIR/$BASIC_FILENAME -d $ORACLE_DIR
+indent "Extracting $SDK_FILENAME..."
+unzip -qq $CACHE_DIR/$SDK_FILENAME -d $ORACLE_DIR
+
+indent "Symlinking libclntsh.so..."
+ln -s libclntsh.so.12.1 $INSTANTCLIENT_DIR/libclntsh.so
+
+export OCI_LIB_DIR=$INSTANTCLIENT_DIR
+export OCI_INC_DIR=$INSTANTCLIENT_DIR/sdk/include
+
+indent "Installing oracledb from npm..."
+THIS_DIR=`pwd`
+cd $BUILD_DIR
+npm install oracledb
+cd $THIS_DIR
+
+indent "Saving environment setup script..."
+mkdir -p $PROFILE_D_DIR
+cat << EOF > $PROFILE_D_DIR/oracle.sh
+#!/usr/bin/env bash
+export LD_LIBRARY_PATH="\$LD_LIBRARY_PATH:\$HOME/.apt/lib/x86_64-linux-gnu:\$HOME/vendor/oracle/instantclient_12_2"
+EOF
+
+indent "Done."
